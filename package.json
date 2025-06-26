@@ -16,11 +16,14 @@
   "dependencies": {
     "@google/generative-ai": "^0.2.0",
     "@octokit/app": "^14.0.0",
+    "@prisma/client": "^6.10.1",
     "axios": "^1.6.0",
     "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.2",
+    "prisma": "^6.10.1",
     "twitter-api-v2": "^1.15.0"
   },
   "devDependencies": {

@@ -5,3 +5,5 @@ private-key.pem
 .DS_Store
 dist/
 coverage/
+/src/generated/prisma
+.history 
