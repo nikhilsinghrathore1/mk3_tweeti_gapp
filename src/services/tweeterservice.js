@@ -15,5 +15,5 @@ export async function createAutoTweet(commitData) {
 }
 
 async function postTweetWithImage(status) {
-  // Implementation here
+
 }

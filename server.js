@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import { TwitterApi } from "twitter-api-v2";
 import { generateTweet } from "./src/config/gemini.js";
 import pkg from 'pg';
+import cors from "cors"
 
 const { Pool } = pkg;
 
@@ -13,6 +14,7 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
+app.use(cors({ origin: "*" }));
 
 // Neon DB connection pool
 const pool = new Pool({
@@ -138,8 +140,8 @@ function createTwitterClient(credentials) {
     const twitterClient = new TwitterApi({
         appKey: credentials.appKey,
         appSecret: credentials.appSecret,
-        accessToken: credentials.accessToken,
-        accessSecret: credentials.accessSecret,
+        accessToken: `1803042326954057728-ppWh3BGb0P5tgUBHyDIvPiqwA6MG9b`,
+        accessSecret: `LxGj79LV927mF8VVVQY6XLT6BsDlQzrVZWegR0bPwossl`,
     });
 
     return twitterClient.readWrite;
@@ -196,12 +198,7 @@ async function analyzeCommit(commit, repository) {
     - Length: UNDER 240 characters
     - Tone: Human, witty, punchy — **not AI-generated**
     - Format: Follow the structure below EXACTLY
-    - Use power verbs like: shipped, crushed, unleashed, crafted, revolutionized, upgraded
-    - Emojis REQUIRED for section separation and visual impact
-    - Always end with this line:
-    - powered by Tweeti  
-    #Coding #GitHub @arweaveIndia
-    
+
     ---
     
     🔧 COMMIT CONTEXT:
@@ -211,20 +208,17 @@ async function analyzeCommit(commit, repository) {
     Commit Type: ${commitContext.commitType}
     
     ---
-    💡EXAMPLE — Your tweet MUST match this tone & structure:
-    📦 Refactored: The dashboard was a monster.  
-    Split it into clean, modular components.  
+    💡EXAMPLES
+    1.i have spent hours debugging auth only to find a missing comma?
     
-    ✅ 20% faster load  
-    ✅ Much easier to maintain  
-    ✅ Dev sanity restored  
-    
-    Next step: reusable analytics blocks for other pages.
+    Just fixed JWT middleware that was failing silently on token refresh.
+    Users can now stay logged in without random logouts every few minutes.
+
+    #GitHub @arweaveIndia.
     ---
     
     🚫 DO NOT:
     - Write like a robot or AI
-    - Skip emojis or hashtags
     - Change structure or omit the final hashtag line
     - always gives technical highlights in point given in EXAMPLE
     
@@ -232,23 +226,23 @@ async function analyzeCommit(commit, repository) {
     
     Now, generate a tweet.
     `;
-    
 
-//     const prompt = `You are a social media manager for a tech product.
-// Given the following code update details, write a short, engaging tweet for end users (not developers):
 
-// ${commitContext.message}
+    //     const prompt = `You are a social media manager for a tech product.
+    // Given the following code update details, write a short, engaging tweet for end users (not developers):
 
-// Instructions:
-// - Summarize the update in simple, friendly language.
-// - Highlight how this change benefits or impacts users.
-// - Use a conversational tone, add only relevant emojis.
-// - If possible, mention the type of update (feature, bug fix, improvement, etc.).
-// - End with a question or call to action to encourage engagement.
-// - Make sure to frame tweet such that it is 280 characters or less.
-// - Add a line break before tagging people.
-// - Always tag @arweaveindia and @ropats16 at the end.
-// `;
+    // ${commitContext.message}
+
+    // Instructions:
+    // - Summarize the update in simple, friendly language.
+    // - Highlight how this change benefits or impacts users.
+    // - Use a conversational tone, add only relevant emojis.
+    // - If possible, mention the type of update (feature, bug fix, improvement, etc.).
+    // - End with a question or call to action to encourage engagement.
+    // - Make sure to frame tweet such that it is 280 characters or less.
+    // - Add a line break before tagging people.
+    // - Always tag @arweaveindia and @ropats16 at the end.
+    // `;
     try {
         // Generate tweet using LLM
         const tweetContent = await generateTweet(prompt);
@@ -360,7 +354,7 @@ async function fetchCommitDetails(repoFullName, commitSha, installationId) {
     }
 }
 
-// Main webhook handler
+
 app.post('/webhook', async (req, res) => {
     console.log('🔔 Webhook received at:', new Date().toISOString());
     console.log('📋 Headers:', {
@@ -370,7 +364,6 @@ app.post('/webhook', async (req, res) => {
     });
 
     try {
-        // Verify GitHub signature
         const signature = req.headers['x-hub-signature-256'];
         const payload = JSON.stringify(req.body);
 
@@ -383,7 +376,6 @@ app.post('/webhook', async (req, res) => {
 
         const event = req.headers['x-github-event'];
 
-        // Handle installation events
         if (event === 'installation') {
             const { action, installation } = req.body;
             console.log(`📦 Installation event: ${action} for installation ${installation.id}`);
@@ -411,15 +403,9 @@ app.post('/webhook', async (req, res) => {
             if (latestCommit.message.includes('[skip-tweet]') ||
                 latestCommit.message.includes('[no-tweet]') ||
                 latestCommit.message.includes('[skip ci]')) {
-                console.log('⏭️ Skipping tweet due to skip flag in commit message');
-                return res.status(200).send('Tweet skipped');
+                console.log('⏭️ Skipping commit due to skip flag in commit message');
+                return res.status(200).send('Commit skipped');
             }
-
-            // // Skip merge commits
-            // if (latestCommit.message.startsWith('Merge ')) {
-            //     console.log('⏭️ Skipping merge commit');
-            //     return res.status(200).send('Merge commit skipped');
-            // }
 
             // Get GitHub username from pusher info
             const githubUsername = pusher.name || pusher.username || latestCommit.author.username;
@@ -429,44 +415,40 @@ app.post('/webhook', async (req, res) => {
                 return res.status(400).send('GitHub username not found');
             }
 
-            // Fetch user-specific Twitter credentials
-            const userCredentials = await getUserCredentials(githubUsername);
+            // Check if user exists in database
+            const client = await pool.connect();
+            try {
+                const userQuery = 'SELECT * FROM x_credentials WHERE github_username = $1';
+                const userResult = await client.query(userQuery, [githubUsername]);
 
-            if (!userCredentials) {
-                console.log(`❌ No Twitter credentials found for user: ${githubUsername}`);
-                return res.status(200).send(`No Twitter credentials configured for user: ${githubUsername}`);
+                if (userResult.rows.length === 0) {
+                    console.log(`❌ No user record found for GitHub username: ${githubUsername}`);
+                    return res.status(200).send(`No user record found for GitHub username: ${githubUsername}`);
+                }
+
+                const userRecord = userResult.rows[0];
+
+                // Create commit message with repository info
+                const commitMessage = `${latestCommit.message}`;
+
+                // Get current commits array and add new commit
+                const currentCommits = userRecord.commits || [];
+                const updatedCommits = [...currentCommits, commitMessage];
+
+                // Update user record to add commit message to commits array
+                const updateQuery = 'UPDATE x_credentials SET commits = $1 WHERE github_username = $2 RETURNING *';
+                const updateResult = await client.query(updateQuery, [updatedCommits, githubUsername]);
+
+                console.log(`✅ Commit message stored successfully for user: ${githubUsername}`);
+                console.log(`📝 Commit: ${commitMessage}`);
+                console.log(`📊 Total commits stored: ${updatedCommits.length}`);
+
+            } catch (dbError) {
+                console.error('❌ Database error:', dbError);
+                return res.status(500).send('Database error');
+            } finally {
+                client.release();
             }
-
-            // Create user-specific Twitter client
-            const userTwitterClient = createTwitterClient(userCredentials);
-
-            // Fetch additional commit details using GitHub App authentication
-            console.log('🔄 Fetching additional commit details from GitHub API...');
-            const commitDetails = await fetchCommitDetails(
-                repository.full_name,
-                latestCommit.id,
-                installation.id
-            );
-
-            // Merge webhook data with API data
-            const enrichedCommit = {
-                ...latestCommit,
-                stats: commitDetails?.stats,
-                repository: repository.name,
-                repositoryUrl: repository.html_url,
-                author: commitDetails?.author || latestCommit.author
-            };
-
-            // Analyze commit and generate tweet
-            console.log('🤖 Analyzing commit and generating tweet...');
-            const tweetContent = await analyzeCommit(enrichedCommit, repository.name);
-
-
-            // Post tweet using user-specific credentials
-            console.log(`🐦 Posting to Twitter for user: ${githubUsername}...`);
-            await postTweet(tweetContent, userTwitterClient);
-
-            console.log(`✅ Tweet posted successfully for commit: ${latestCommit.id.substring(0, 7)} by ${githubUsername}`);
         }
 
         res.status(200).send('Webhook processed successfully');
@@ -477,41 +459,607 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// Health check endpoint
-app.get('/health', async (req, res) => {
+app.get("/all_user", async (req, res) => {
     try {
         const client = await pool.connect();
-        const result = await client.query('SELECT COUNT(*) as user_count FROM x_credentials');
-        const userCount = result.rows[0].user_count;
-        client.release();
 
-        res.status(200).json({
-            status: 'OK',
-            timestamp: new Date().toISOString(),
-            appId: config.github.appId,
-            database: 'Connected to Neon DB',
-            storedUsers: parseInt(userCount)
-        });
-    } catch (error) {
-        console.error('Health check failed:', error);
+        const updateQuery = `
+                SELECT * FROM x_credentials
+            `;
+        const updateResult = await client.query(updateQuery);
+        console.log(updateResult.rows)
+        const finalUsers = updateResult.rows;
+        res.status(200).json({ msg: "these are all the users", finalUsers })
+
+    } catch (e) {
+        console.log("this is the error ", e)
+        res.status(400).json({ msg: "internal server issue " })
+    }
+})
+
+app.post("/cron_post", async (req, res) => {
+    try {
+
+        const client = await pool.connect();
+
+        try {
+            console.log('🚀 Starting cron job for automated tweet posting...');
+
+            // Fetch all users from database
+            const updateQuery = `SELECT * FROM x_credentials`;
+            const updateResult = await client.query(updateQuery);
+            const finalUsers = updateResult.rows;
+
+            console.log(`📊 Found ${finalUsers.length} users to process`);
+
+            const results = [];
+
+            // Process each user
+            for (const user of finalUsers) {
+                try {
+                    console.log(`\n👤 Processing user: ${user.github_username}`);
+
+                    // Check if user has commits to process
+                    if (!user.commits || user.commits.length === 0) {
+                        console.log(`⏭️ No commits found for user: ${user.github_username}`);
+                        results.push({
+                            user: user.github_username,
+                            status: 'skipped',
+                            reason: 'No commits found'
+                        });
+                        continue;
+                    }
+
+                    // Check if user has Twitter credentials
+                    if (!user.access_token || !user.access_secret) {
+                        console.log(`❌ No Twitter credentials for user: ${user.github_username}`);
+                        results.push({
+                            user: user.github_username,
+                            status: 'failed',
+                            reason: 'No Twitter credentials'
+                        });
+                        continue;
+                    }
+
+                    // Get the latest commit or combine multiple commits
+                    const latestCommit = user.commits[user.commits.length - 1];
+                    const recentCommits = user.commits.slice(-3); // Get last 3 commits
+
+                    console.log(`📝 Processing ${recentCommits.length} recent commits for ${user.github_username}`);
+
+                    // Create tweet content based on user's tone settings and commits
+                    const tweetContent = await generateCronTweet(recentCommits, user);
+
+                    if (!tweetContent) {
+                        console.log(`❌ Failed to generate tweet for user: ${user.github_username}`);
+                        results.push({
+                            user: user.github_username,
+                            status: 'failed',
+                            reason: 'Tweet generation failed'
+                        });
+                        continue;
+                    }
+
+                    // Create Twitter client for this user
+                    const twitterCredentials = {
+                        appKey: process.env.TWITTER_API_KEY,
+                        appSecret: process.env.TWITTER_API_SECRET,
+                        accessToken: user.access_token,
+                        accessSecret: user.access_secret
+                    };
+
+                    const twitterClient = createTwitterClient(twitterCredentials);
+
+                    // Post the tweet
+                    const tweet = await postTweet(tweetContent, twitterClient);
+
+                    if (tweet) {
+                        console.log(`✅ Tweet posted successfully for ${user.github_username}`);
+                        console.log(`📱 Tweet ID: ${tweet.data.id}`);
+
+                        // Clear processed commits from database
+                        await clearProcessedCommits(user.github_username, client);
+
+                        results.push({
+                            user: user.github_username,
+                            status: 'success',
+                            tweetId: tweet.data.id,
+                            content: tweetContent.substring(0, 100) + '...'
+                        });
+                    }
+
+                } catch (userError) {
+                    console.error(`❌ Error processing user ${user.github_username}:`, userError);
+                    results.push({
+                        user: user.github_username,
+                        status: 'failed',
+                        reason: userError.message
+                    });
+                }
+            }
+
+            console.log('\n📈 Cron job completed');
+            console.log(`✅ Successfully processed: ${results.filter(r => r.status === 'success').length}`);
+            console.log(`❌ Failed: ${results.filter(r => r.status === 'failed').length}`);
+            console.log(`⏭️ Skipped: ${results.filter(r => r.status === 'skipped').length}`);
+
+            res.status(200).json({
+                msg: "Cron job completed successfully",
+                summary: {
+                    totalUsers: finalUsers.length,
+                    successful: results.filter(r => r.status === 'success').length,
+                    failed: results.filter(r => r.status === 'failed').length,
+                    skipped: results.filter(r => r.status === 'skipped').length
+                },
+                results: results
+            });
+
+        } finally {
+            client.release();
+        }
+
+    } catch (e) {
+        console.error("❌ Cron job error:", e);
         res.status(500).json({
-            status: 'ERROR',
-            timestamp: new Date().toISOString(),
-            appId: config.github.appId,
-            database: 'Connection failed',
-            error: error.message
+            msg: "Internal server error: " + e.message,
+            error: e.toString()
         });
+    }
+});
+
+// Helper function to generate tweet content for cron job
+async function generateCronTweet(commits, user) {
+    try {
+        const userTone = user.tone ? JSON.parse(user.tone) : {};
+        const githubUsername = user.github_username;
+
+        // Create a summary of commits
+        const commitSummary = commits.map((commit, index) =>
+            `${index + 1}. ${commit}`
+        ).join('\n');
+
+        // Build dynamic prompt based on user's tone settings
+        const toneInstructions = buildToneInstructions(userTone);
+
+        const prompt = `You are an expert Twitter copywriter creating authentic developer update tweets.
+
+🔒 STRICT REQUIREMENTS:
+- Length: UNDER 230 characters
+- Tone: ${toneInstructions.tone}
+- Style: ${toneInstructions.style}
+- Audience: ${toneInstructions.audience}
+- Formality: ${toneInstructions.formality}
+
+📝 RECENT COMMITS SUMMARY:
+Developer: ${githubUsername}
+Recent work: ${commitSummary}
+
+🎯 TWEET STRUCTURE:
+1. Hook/Opening (what you've been working on)
+2. Key technical highlight or achievement
+3. Impact or result
+4. Closing with engagement
+
+${toneInstructions.keywords ? `🔑 KEYWORDS TO INCLUDE: ${toneInstructions.keywords}` : ''}
+
+📋 ENHANCED EXAMPLES:
+
+🔥 Problem-Solving Victory:
+"spent 3 days debugging a memory leak 🐛
+
+turns out it was a single missing cleanup in our WebSocket handler
+
+app now runs 40% smoother, no more random crashes
+
+anyone else have those "duh" moments that make you question everything?
+
+#debugging #javascript #webdev"
+
+🚀 Feature Launch:
+"new feature just dropped! 🎉
+
+built real-time collaborative editing from scratch
+- conflict resolution ✅
+- 99.9% uptime ✅
+- sub-100ms latency ✅
+
+feels like magic when it all clicks
+
+what's your favorite real-time feature to build?
+
+#reactjs #websockets #collaboration"
+
+🛠️ Technical Achievement:
+"rewrote our entire CI/CD pipeline this week ⚡
+
+docker → kubernetes → zero-downtime deployments
+
+went from 45min builds to 8min builds
+
+the dopamine hit from green checkmarks is unmatched
+
+#devops #kubernetes #cicd"
+
+💡 Learning/Discovery:
+"TIL: you can use CSS container queries for responsive components 🤯
+
+no more media queries cluttering up my stylesheets
+
+component-driven responsive design is the future
+
+drop your favorite CSS tricks below 👇
+
+#css #frontend #webdev"
+
+🔧 Refactoring Win:
+"deleted 2,000 lines of code today 🗑️
+
+replaced legacy authentication system with NextAuth.js
+
+same functionality, 80% less maintenance overhead
+
+sometimes the best code is the code you don't write
+
+#nextjs #typescript #refactoring"
+
+📊 Performance Improvement:
+"optimized our database queries over the weekend 📈
+
+added proper indexing + query optimization
+- 300ms → 12ms response times
+- 95% reduction in server load
+
+users are actually noticing the speed difference
+
+#postgresql #performance #backend"
+
+🎨 UI/UX Enhancement:
+"redesigned our dashboard from the ground up ✨
+
+switched to shadcn/ui components
+- cleaner code
+- better accessibility
+- 50% faster load times
+
+dark mode hits different when done right 🌙
+
+#ui #design #react"
+
+🧪 Experimental/Side Project:
+"weekend experiment: built a VS Code extension 🔌
+
+auto-generates TypeScript interfaces from API responses
+
+saved myself 2 hours already this week
+
+building tools for yourself is peak developer satisfaction
+
+#vscode #typescript #productivity"
+
+🔄 Migration/Modernization:
+"migrated 50k+ users from Firebase to Supabase 📦
+
+zero downtime, zero data loss, zero complaints
+
+open source alternatives hitting different these days
+
+what's your go-to backend stack in 2025?
+
+#supabase #migration #opensource"
+
+🐛 Bug Hunt Victory:
+"finally caught that Heisenbug that's been haunting production 👻
+
+race condition in our event queue system
+
+took 3 weeks but the fix was literally 2 lines
+
+debugging distributed systems is an art form
+
+#debugging #distributed #eventdriven"
+
+🚨 Security Enhancement:
+"hardened our API security this week 🔐
+
+implemented rate limiting + JWT refresh rotation
+- 99.9% reduction in bot traffic
+- zero security incidents
+
+sleep better knowing your app is bulletproof
+
+#security #api #jwt"
+
+🌟 Open Source Contribution:
+"contributed to @vercel/next.js for the first time! 🎯
+
+fixed an edge case in their image optimization
+
+seeing your PR get merged into a tool you use daily = 🤌
+
+what's your first open source contribution story?
+
+#opensource #nextjs #community"
+
+✅ FINAL REQUIREMENTS:
+- Write like a real developer sharing genuine wins/struggles
+- Include relevant emojis (2-4 max, strategically placed)
+- End with 2-3 relevant hashtags
+- ${toneInstructions.callToAction !== 'None' ? `Include a ${toneInstructions.callToAction.toLowerCase()}` : 'Optional call to action or question'}
+- Keep it conversational and authentic
+- Show technical depth without being overly complex
+- Include specific metrics/results when possible
+
+Generate the tweet now:`;
+
+        const tweetContent = await generateTweet(prompt);
+
+        if (!tweetContent) {
+            throw new Error('LLM returned empty content');
+        }
+
+        // Validate tweet length
+        if (tweetContent.length > 280) {
+            console.warn(`Generated tweet is ${tweetContent.length} characters, may be too long`);
+        }
+
+        return tweetContent;
+
+    } catch (error) {
+        console.error('Error generating cron tweet:', error);
+
+        // Enhanced fallback tweet generation
+        const fallbackTweet = generateFallbackCronTweet(commits, user);
+        console.log('Using fallback tweet generation for cron');
+        return fallbackTweet;
+    }
+}
+
+// Helper function to build tone instructions
+function buildToneInstructions(toneSettings) {
+    return {
+        tone: Array.isArray(toneSettings.tone) ? toneSettings.tone.join(', ') : (toneSettings.tone || 'Professional, friendly'),
+        style: Array.isArray(toneSettings.style) ? toneSettings.style.join(', ') : (toneSettings.style || 'Conversational'),
+        audience: toneSettings.audience || 'Fellow developers',
+        formality: toneSettings.formality || 'Semi-formal',
+        keywords: toneSettings.keywords || '',
+        callToAction: toneSettings.callToAction || 'None'
+    };
+}
+
+// Fallback tweet generation for cron job
+function generateFallbackCronTweet(commits, user) {
+    const githubUsername = user.github_username;
+    const commitCount = commits.length;
+
+    // Get the most recent commit
+    const latestCommit = commits[commits.length - 1];
+    const truncatedMessage = latestCommit.length > 80 ?
+        latestCommit.substring(0, 77) + '...' : latestCommit;
+
+    const emojis = ['💻', '🚀', '⚡', '🔧', '✨', '🎯'];
+    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+    const templates = [
+        `${randomEmoji} Just pushed ${commitCount} update${commitCount > 1 ? 's' : ''} today!
+
+Latest: "${truncatedMessage}"
+
+Another day of building cool stuff 🛠️
+
+#coding #github #devlife`,
+
+        `${randomEmoji} Been busy coding today...
+
+"${truncatedMessage}"
+
+${commitCount > 1 ? `+ ${commitCount - 1} more commits` : ''}
+
+What did you ship today? 🤔
+
+#dev #github #coding`,
+
+        `${randomEmoji} Today's development update:
+
+${truncatedMessage}
+
+Progress feels good! 📈
+
+#github #coding #tech`
+    ];
+
+    const randomTemplate = templates[Math.floor(Math.random() * templates.length)];
+
+    // Ensure it's under 240 characters
+    if (randomTemplate.length > 240) {
+        return randomTemplate.substring(0, 237) + '...';
+    }
+
+    return randomTemplate;
+}
+
+// Helper function to clear processed commits
+async function clearProcessedCommits(githubUsername, client) {
+    try {
+        // First, get the current tone settings
+        const getCurrentToneQuery = 'SELECT tone FROM x_credentials WHERE github_username = $1';
+        const result = await client.query(getCurrentToneQuery, [githubUsername]);
+
+        let updatedTone = null;
+
+        if (result.rows.length > 0 && result.rows[0].tone) {
+            try {
+                // Parse the existing tone JSON
+                const currentTone = JSON.parse(result.rows[0].tone);
+
+                // Update the keywords field to null
+                const updatedToneSettings = {
+                    ...currentTone,
+                    keywords: null
+                };
+
+                // Convert back to JSON string
+                updatedTone = JSON.stringify(updatedToneSettings);
+            } catch (parseError) {
+                console.warn(`⚠️ Error parsing tone for ${githubUsername}, resetting to default:`, parseError);
+
+                // Create default tone settings with keywords set to null
+                const defaultTone = {
+                    style: [],
+                    tone: [],
+                    audience: '',
+                    formality: '',
+                    length: '',
+                    keywords: null,
+                    brandVoice: '',
+                    emotionalTone: '',
+                    contentType: '',
+                    callToAction: '',
+                    targetEngagement: '',
+                    industry: '',
+                    hashtagStyle: ''
+                };
+
+                updatedTone = JSON.stringify(defaultTone);
+            }
+        } else {
+            // If no tone exists, create default tone settings
+            const defaultTone = {
+                style: [],
+                tone: [],
+                audience: '',
+                formality: '',
+                length: '',
+                keywords: null,
+                brandVoice: '',
+                emotionalTone: '',
+                contentType: '',
+                callToAction: '',
+                targetEngagement: '',
+                industry: '',
+                hashtagStyle: ''
+            };
+
+            updatedTone = JSON.stringify(defaultTone);
+        }
+
+        // Clear commits and update tone in a single query
+        const clearQuery = 'UPDATE x_credentials SET commits = $1, tone = $2 WHERE github_username = $3';
+        await client.query(clearQuery, [[], updatedTone, githubUsername]);
+
+        console.log(`🧹 Cleared commits and reset tone.keywords for user: ${githubUsername}`);
+
+    } catch (error) {
+        console.error(`❌ Error clearing commits and updating tone for ${githubUsername}:`, error);
+
+        // Fallback: just clear commits if tone update fails
+        try {
+            const fallbackQuery = 'UPDATE x_credentials SET commits = $1 WHERE github_username = $2';
+            await client.query(fallbackQuery, [[], githubUsername]);
+            console.log(`🔄 Fallback: Only cleared commits for user: ${githubUsername}`);
+        } catch (fallbackError) {
+            console.error(`❌ Fallback also failed for ${githubUsername}:`, fallbackError);
+        }
+    }
+}
+
+app.post("/set_tone", async (req, res) => {
+    const data = req.body;
+
+    if (!data) {
+
+        return res.status(400).json({ msg: "No tone data was found" });
+    }
+    console.log("this is the data ", data.toneSettings)
+    // Validate required fields
+    const {
+        style,
+        tone,
+        audience,
+        formality,
+        length,
+        keywords,
+        brandVoice,
+        emotionalTone,
+        contentType,
+        callToAction,
+        targetEngagement,
+        industry,
+        hashtagStyle,
+        github_username
+    } = data;
+
+    if (!github_username) {
+        return res.status(400).json({ msg: "GitHub username is required" });
+    }
+
+    try {
+        const client = await pool.connect();
+
+        try {
+            // Check if user exists
+            const userQuery = 'SELECT * FROM x_credentials WHERE github_username = $1';
+            const userResult = await client.query(userQuery, [github_username]);
+
+            if (userResult.rows.length === 0) {
+                return res.status(404).json({ msg: "User not found" });
+            }
+            const finalData = data.toneSettings;
+            const toneData = {
+                style: finalData.style || [],
+                tone: finalData.tone || [],
+                audience: finalData.audience || "General",
+                formality: finalData.formality || "Professional",
+                length: finalData.length || "Medium",
+                keywords: finalData.keywords || "",
+                brandVoice: finalData.brandVoice || "Authentic",
+                emotionalTone: finalData.emotionalTone || "Neutral",
+                contentType: finalData.contentType || "Educational",
+                callToAction: finalData.callToAction || "None",
+                targetEngagement: finalData.targetEngagement || "Likes",
+                industry: finalData.industry || "Technology",
+                hashtagStyle: finalData.hashtagStyle || "Minimal"
+            };
+
+            // Update user's tone settings
+            const updateQuery = `
+                UPDATE x_credentials 
+                SET tone = $1 
+                WHERE github_username = $2 
+                RETURNING *
+            `;
+
+            const updateResult = await client.query(updateQuery, [
+                JSON.stringify(toneData),
+                github_username
+            ]);
+            console.log("this is the updated result ", updateResult)
+
+            console.log(`✅ Tone settings updated for user: ${github_username}`);
+            console.log(`📝 Tone data:`, toneData);
+
+            res.status(200).json({
+                msg: "Tone settings updated successfully",
+                user: github_username,
+                toneSettings: toneData
+            });
+
+        } catch (dbError) {
+            console.error('❌ Database error:', dbError);
+            res.status(500).json({ msg: "Database error: " + dbError.message });
+        } finally {
+            client.release();
+        }
+
+    } catch (e) {
+        console.log("This is the error:", e);
+        res.status(500).json({ msg: "Server error: " + e.message });
     }
 });
 
 // Start server
 app.listen(config.port, async () => {
-    console.log(`🚀 GitHub App Twitter Bot server running on port ${config.port}`);
-    console.log(`📱 App ID: ${config.github.appId}`);
-    console.log(`🔗 Install URL: https://github.com/apps/${process.env.GITHUB_APP_NAME}/installations/new`);
     console.log(`🗄️ Using Neon PostgreSQL Database`);
 
-    // Test database connection on startup
     await testConnection();
 });
 
@@ -532,8 +1080,9 @@ process.on('SIGTERM', async () => {
     try {
         await pool.end();
         console.log('✅ Database connection pool closed');
-    } catch (error) {
-        console.error('❌ Error closing database connection:', error);
+    }
+    catch (e) {
+        console.log("this is the error msg", e)
     }
     process.exit(0);
 });

@@ -13,5 +13,13 @@ model x_credentials {
   access_token    String?
   access_secret   String?
   created_at      DateTime? @default(now()) @db.Timestamp(6)
-  github_username String?
+  github_username String?   @unique(map: "unique_github_username")
+  tone            String?
+  image           String?
+  scheduled_time  DateTime?
+  ispremium       Boolean?  @default(false)
+  email           String?
+  X_username      String?
+  commits         String[]  
+  generated_msg   String?
 }
